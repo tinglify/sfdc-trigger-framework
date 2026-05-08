@@ -156,7 +156,29 @@ public virtual class TriggerHandler {
     if(!this.isTriggerExecuting || this.context == null) {
       throw new TriggerHandlerException('Trigger handler called outside of Trigger execution');
     }
+
+    if(!hasPermissionToRun()){
+      return false;
+    }
+
     return !TriggerHandler.bypassedHandlers.contains(getHandlerName());
+  }
+  
+  private Boolean hasPermissionToRun(){
+    if(!getHandlerMetadataSettings().isActive__c
+       || FeatureManagement.checkPermission('Bypass_Apex_Triggers')){
+      return false;
+    }
+
+    return getGlobalCustomMetadataSetting().isActive__c;
+  }
+
+  private SObject_Trigger_Setting__mdt getHandlerMetadataSettings(){
+    return SObject_Trigger_Setting__mdt.getInstance(getHandlerName()) ?? (SObject_Trigger_Setting__mdt) Type.forName('SObject_Trigger_Setting__mdt').newInstance();
+  }
+
+  private SObject_Trigger_Setting__mdt getGlobalCustomMetadataSetting(){
+    return SObject_Trigger_Setting__mdt.getInstance('GLOBAL');
   }
 
   @TestVisible
