@@ -4,6 +4,14 @@
     <description>Disables all triggers for all users</description>
     <protected>false</protected>
     <values>
+        <field>Log_Operations__c</field>
+        <value xsi:type="xsd:boolean">false</value>
+    </values>
+    <values>
+        <field>Logger__c</field>
+        <value xsi:nil="true"/>
+    </values>
+    <values>
         <field>isActive__c</field>
         <value xsi:type="xsd:boolean">true</value>
     </values>

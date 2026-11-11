@@ -137,6 +137,87 @@ TriggerHandler.clearAllBypasses();
 // ... now handlers won't be ignored!
 ```
 
+### Logging
+
+The framework can send handler errors and handler runs to your logging framework without any logging calls in your handlers. Write one adapter class that implements `TriggerHandler.ErrorLogger`, `TriggerHandler.OperationLogger`, or both, and put its name in the `Logger__c` field of the `GLOBAL` `SObject_Trigger_Setting__mdt` record. When `Logger__c` is blank, or the class doesn't implement one of the interfaces, that kind of log goes to the debug log.
+
+#### Error logging
+
+Every exception thrown from a handler is passed to `ErrorLogger.logError` before it is either added to the records (when `handleErrorsCleanly()` returns `true`) or rethrown. The logger receives a `TriggerHandler.TriggerError` with:
+
+* `cause` - the original exception
+* `handlerName` - e.g. `AccountTriggerHandler`
+* `operation` - a `System.TriggerOperation` name, e.g. `BEFORE_INSERT`
+* `referenceId` - the request id, which is also shown to the user in generic error messages
+* `records` / `getRecordIds()` - the records in the trigger
+* `handledCleanly` - `false` when the exception is rethrown
+* `userMessage` - the message added to the records, or `null` when rethrown
+
+#### Operation logging
+
+Check `Log_Operations__c` on the `GLOBAL` record to log every handler run, or on a handler's own record to log only that handler. After each run, including failed ones, `OperationLogger.logRun` receives a `TriggerHandler.TriggerRun` with:
+
+* `handlerName`, `operation`, `referenceId`, `records` / `getRecordIds()` - as above
+* `durationMs` - wall-clock time of the run
+* `cpuTimeMs` - CPU time used by the run
+* `succeeded` - `false` when the handler threw
+* `error` - the `TriggerError` passed to the error logger, or `null`
+
+Runs skipped by the bypass API, the `Bypass_Apex_Triggers` permission, or an inactive setting are not logged.
+
+Each logged run can publish a platform event, which counts against your limits, so turn operation logging on where you need it rather than everywhere by default.
+
+#### Adapters
+
+If a logger throws, the failure goes to the debug log, and the handler's own result is unchanged: the original error is still added to the records or rethrown.
+
+A clean error rolls back the transaction's DML, so loggers must publish with a Publish Immediately platform event. Nebula Logger and Triton both do this by default.
+
+[Nebula Logger](https://github.com/jongpie/NebulaLogger):
+
+```java
+public class NebulaTriggerLogger implements TriggerHandler.ErrorLogger, TriggerHandler.OperationLogger {
+  public void logError(TriggerHandler.TriggerError error) {
+    Logger.error(error.handlerName + ' failed in ' + error.operation + ' [' + error.referenceId + ']')
+      .setExceptionDetails(error.cause)
+      .addTag('TriggerHandler')
+      .addTag(error.handlerName);
+    Logger.saveLog();
+  }
+
+  public void logRun(TriggerHandler.TriggerRun run) {
+    Logger.info(run.handlerName + ' ' + run.operation + ' on ' + run.records.size() + ' records in '
+        + run.durationMs + 'ms (' + run.cpuTimeMs + 'ms CPU)')
+      .addTag('TriggerHandler')
+      .addTag(run.handlerName);
+    Logger.saveLog();
+  }
+}
+```
+
+[Pharos Triton](https://github.com/Pharos-AI/triton):
+
+```java
+public class TritonTriggerLogger implements TriggerHandler.ErrorLogger, TriggerHandler.OperationLogger {
+  public void logError(TriggerHandler.TriggerError error) {
+    Triton.logNow(Triton.makeBuilder()
+      .exception(error.cause)
+      .operation(error.handlerName + '.' + error.operation)
+      .relatedObjects(error.getRecordIds()));
+  }
+
+  public void logRun(TriggerHandler.TriggerRun run) {
+    Triton.logNow(Triton.makeBuilder()
+      .info(run.handlerName + ' ' + run.operation + ' on ' + run.records.size() + ' records')
+      .operation(run.handlerName + '.' + run.operation)
+      .duration(run.durationMs)
+      .relatedObjects(run.getRecordIds()));
+  }
+}
+```
+
+To log differently for one handler, override `logError(TriggerHandler.TriggerError error)` or `logRun(TriggerHandler.TriggerRun run)` in that handler.
+
 ## Overridable Methods
 
 Here are all of the methods that you can override. All of the context possibilities are supported.
