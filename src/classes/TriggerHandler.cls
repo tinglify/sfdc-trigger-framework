@@ -180,7 +180,7 @@ public virtual class TriggerHandler {
   }
 
   @TestVisible
-  protected virtual Boolean handleErrorsCleanly() { return false; }
+  protected virtual Boolean handleErrorsCleanly() { return true; }
 
   @TestVisible
   protected virtual String cleanErrorMessage(Exception e, String referenceId) {
