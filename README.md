@@ -71,6 +71,35 @@ trigger OpportunityTrigger on Opportunity (before insert, before update) {
 }
 ```
 
+## Settings
+
+Handlers are switched on and off with `SObject_Trigger_Setting__mdt` custom metadata records. **A handler only runs if it has an active record named after its class.** A new handler without a record does nothing until you create one, so every handler that runs was turned on deliberately.
+
+| Record | Field | Effect |
+| --- | --- | --- |
+| `GLOBAL` | `isActive__c` | Unchecked stops every handler. |
+| `GLOBAL` | `Logger__c` | Adapter class for [logging](#logging). Blank writes to the debug log. |
+| `GLOBAL` | `Log_Operations__c` | Checked logs every handler run. |
+| Handler, e.g. `OpportunityTriggerHandler` | `isActive__c` | Must be checked for the handler to run. |
+| Handler | `Log_Operations__c` | Checked logs this handler's runs. |
+
+`Logger__c` is only read from the `GLOBAL` record. If there is no `GLOBAL` record, all handlers that have an active record of their own run, and nothing is logged beyond the debug log.
+
+Users with the `Bypass_Apex_Triggers` custom permission skip every handler, for example for data loads or integration users.
+
+When a handler is skipped, the debug log gets an INFO line with the reason:
+
+```
+OpportunityTriggerHandler skipped: no SObject_Trigger_Setting__mdt record named OpportunityTriggerHandler
+```
+
+The reasons, in the order they are checked, are:
+1. The `GLOBAL` record is inactive.
+2. The handler has no record.
+3. The handler's record is inactive.
+4. The running user has `Bypass_Apex_Triggers`.
+5. The handler was bypassed with the [bypass API](#bypass-api).
+
 ## Cool Stuff
 
 ### Max Loop Count
@@ -143,7 +172,7 @@ The framework can send handler errors and handler runs to your logging framework
 
 #### Error logging
 
-Every exception thrown from a handler is passed to `ErrorLogger.logError` before it is either added to the records (when `handleErrorsCleanly()` returns `true`) or rethrown. The logger receives a `TriggerHandler.TriggerError` with:
+Every exception thrown from a handler is passed to `ErrorLogger.logError` before it is either added to the records (the default) or rethrown (when the handler overrides `handleErrorsCleanly()` to return `false`). The logger receives a `TriggerHandler.TriggerError` with:
 
 * `cause` - the original exception
 * `handlerName` - e.g. `AccountTriggerHandler`

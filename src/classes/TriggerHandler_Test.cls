@@ -117,6 +117,69 @@ private class TriggerHandler_Test {
     resetTest();
   }
 
+  // skip reason tests
+
+  @isTest
+  static void testSkipReasonNullWhenActive() {
+    activeSettings();
+
+    System.assertEquals(null, handler.getSkipReason(), 'an active handler should not be skipped');
+  }
+
+  @isTest
+  static void testSkipReasonGlobalInactive() {
+    activeSettings();
+    TriggerHandler.globalTriggerSetting = new SObject_Trigger_Setting__mdt(isActive__c = false);
+    beforeInsertMode();
+
+    handler.run();
+
+    System.assertEquals(null, lastMethodCalled, 'the handler should not run when GLOBAL is inactive');
+    System.assertEquals('the GLOBAL SObject_Trigger_Setting__mdt record is inactive', handler.getSkipReason(), 'the skip reason should name GLOBAL');
+  }
+
+  @isTest
+  static void testSkipReasonMissingRecord() {
+    activeSettings();
+    handler.handlerTriggerSetting = new SObject_Trigger_Setting__mdt();
+    beforeInsertMode();
+
+    handler.run();
+
+    System.assertEquals(null, lastMethodCalled, 'a handler without a record should not run');
+    System.assertEquals('no SObject_Trigger_Setting__mdt record named TestHandler', handler.getSkipReason(), 'the skip reason should name the missing record');
+  }
+
+  @isTest
+  static void testSkipReasonInactiveRecord() {
+    activeSettings();
+    handler.handlerTriggerSetting = (SObject_Trigger_Setting__mdt) JSON.deserialize(
+      '{"DeveloperName": "TestHandler", "isActive__c": false}', SObject_Trigger_Setting__mdt.class
+    );
+    beforeInsertMode();
+
+    handler.run();
+
+    System.assertEquals(null, lastMethodCalled, 'a handler with an inactive record should not run');
+    System.assertEquals('its SObject_Trigger_Setting__mdt record is inactive', handler.getSkipReason(), 'the skip reason should name the inactive record');
+  }
+
+  @isTest
+  static void testSkipReasonBypassPermission() {
+    activeSettings();
+    TriggerHandler.userHasBypassPermission = true;
+
+    System.assertEquals('the running user has the Bypass_Apex_Triggers custom permission', handler.getSkipReason(), 'the skip reason should name the permission');
+  }
+
+  @isTest
+  static void testSkipReasonBypassApi() {
+    activeSettings();
+    TriggerHandler.bypass('TestHandler');
+
+    System.assertEquals('bypassed with TriggerHandler.bypass()', handler.getSkipReason(), 'the skip reason should name the bypass api');
+  }
+
   // instance method tests
 
   @isTest
@@ -133,16 +196,12 @@ private class TriggerHandler_Test {
     // clear the tests
     resetTest();
 
-    try {
-      // try running it. This should exceed the limit.
-      handler.run();
-      System.assert(false, 'the handler should throw on the 3rd run when maxloopcount is 3');
-    } catch(TriggerHandler.TriggerHandlerException te) {
-      // we're expecting to get here
-      System.assertEquals(null, lastMethodCalled, 'last method should be null');
-    } catch(Exception e) {  
-      System.assert(false, 'the exception thrown was not expected: ' + e.getTypeName() + ': ' + e.getMessage());
-    }
+    // try running it. This should exceed the limit and add the error to the records.
+    Contact record = new Contact();
+    handler.triggerRecords = new List<SObject>{ record };
+    handler.run();
+    System.assertEquals(null, lastMethodCalled, 'last method should be null');
+    System.assert(record.getErrors()[0].getMessage().startsWith('Maximum loop count of 2 reached'), 'the loop count error should be added to the records');
 
     // clear the tests
     resetTest();
@@ -184,6 +243,11 @@ private class TriggerHandler_Test {
   }
 
   // clean error handling tests
+
+  @isTest
+  static void testErrorsHandledCleanlyByDefault() {
+    System.assertEquals(true, new TriggerHandler().handleErrorsCleanly(), 'errors should be handled cleanly unless a handler opts out');
+  }
 
   @isTest
   static void testCleanErrorCustomExceptionMessage() {
@@ -523,6 +587,11 @@ private class TriggerHandler_Test {
 
   private static void resetTest() {
     lastMethodCalled = null;
+  }
+
+  private static void activeSettings() {
+    TriggerHandler.globalTriggerSetting = new SObject_Trigger_Setting__mdt(isActive__c = true);
+    TriggerHandler.userHasBypassPermission = false;
   }
 
   private static Contact runCleanErrorHandler(String failureMode) {

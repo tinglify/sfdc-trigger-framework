@@ -303,23 +303,37 @@ public virtual class TriggerHandler {
       throw new TriggerHandlerException('Trigger handler called outside of Trigger execution');
     }
 
-    if(!hasPermissionToRun()){
+    String skipReason = this.getSkipReason();
+    if(skipReason != null) {
+      System.debug(LoggingLevel.INFO, getHandlerName() + ' skipped: ' + skipReason);
       return false;
     }
 
-    return !TriggerHandler.bypassedHandlers.contains(getHandlerName());
+    return true;
   }
-  
-  private Boolean hasPermissionToRun(){
-    if(!globalTriggerSetting.isActive__c){
-    	return false;
-    }
-      
-    if(!handlerTriggerSetting.isActive__c || userHasBypassPermission){
-      	return false;
+
+  // null when the handler should run
+  @TestVisible
+  private String getSkipReason() {
+    if(globalTriggerSetting.isActive__c != true) {
+      return 'the GLOBAL SObject_Trigger_Setting__mdt record is inactive';
     }
 
-    return true;
+    if(handlerTriggerSetting.isActive__c != true) {
+      return handlerTriggerSetting.DeveloperName == null
+             ? 'no SObject_Trigger_Setting__mdt record named ' + getHandlerName()
+             : 'its SObject_Trigger_Setting__mdt record is inactive';
+    }
+
+    if(userHasBypassPermission) {
+      return 'the running user has the Bypass_Apex_Triggers custom permission';
+    }
+
+    if(TriggerHandler.bypassedHandlers.contains(getHandlerName())) {
+      return 'bypassed with TriggerHandler.bypass()';
+    }
+
+    return null;
   }
 
   @TestVisible
