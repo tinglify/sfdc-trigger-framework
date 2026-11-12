@@ -71,6 +71,35 @@ trigger OpportunityTrigger on Opportunity (before insert, before update) {
 }
 ```
 
+## Settings
+
+Handlers are switched on and off with `SObject_Trigger_Setting__mdt` custom metadata records. **A handler only runs if it has an active record named after its class.** A new handler without a record does nothing until you create one, so every handler that runs was turned on deliberately.
+
+| Record | Field | Effect |
+| --- | --- | --- |
+| `GLOBAL` | `isActive__c` | Unchecked stops every handler. |
+| `GLOBAL` | `Logger__c` | Adapter class for [logging](#logging). Blank writes to the debug log. |
+| `GLOBAL` | `Log_Operations__c` | Checked logs every handler run. |
+| Handler, e.g. `OpportunityTriggerHandler` | `isActive__c` | Must be checked for the handler to run. |
+| Handler | `Log_Operations__c` | Checked logs this handler's runs. |
+
+`Logger__c` is only read from the `GLOBAL` record. If there is no `GLOBAL` record, all handlers that have an active record of their own run, and nothing is logged beyond the debug log.
+
+Users with the `Bypass_Apex_Triggers` custom permission skip every handler, for example for data loads or integration users.
+
+When a handler is skipped, the debug log gets an INFO line with the reason:
+
+```
+OpportunityTriggerHandler skipped: no SObject_Trigger_Setting__mdt record named OpportunityTriggerHandler
+```
+
+The reasons, in the order they are checked, are:
+1. The `GLOBAL` record is inactive.
+2. The handler has no record.
+3. The handler's record is inactive.
+4. The running user has `Bypass_Apex_Triggers`.
+5. The handler was bypassed with the [bypass API](#bypass-api).
+
 ## Cool Stuff
 
 ### Max Loop Count
@@ -136,6 +165,87 @@ TriggerHandler.clearAllBypasses();
 
 // ... now handlers won't be ignored!
 ```
+
+### Logging
+
+The framework can send handler errors and handler runs to your logging framework without any logging calls in your handlers. Write one adapter class that implements `TriggerHandler.ErrorLogger`, `TriggerHandler.OperationLogger`, or both, and put its name in the `Logger__c` field of the `GLOBAL` `SObject_Trigger_Setting__mdt` record. When `Logger__c` is blank, or the class doesn't implement one of the interfaces, that kind of log goes to the debug log.
+
+#### Error logging
+
+Every exception thrown from a handler is passed to `ErrorLogger.logError` before it is either added to the records (the default) or rethrown (when the handler overrides `handleErrorsCleanly()` to return `false`). The logger receives a `TriggerHandler.TriggerError` with:
+
+* `cause` - the original exception
+* `handlerName` - e.g. `AccountTriggerHandler`
+* `operation` - a `System.TriggerOperation` name, e.g. `BEFORE_INSERT`
+* `referenceId` - the request id, which is also shown to the user in generic error messages
+* `records` / `getRecordIds()` - the records in the trigger
+* `handledCleanly` - `false` when the exception is rethrown
+* `userMessage` - the message added to the records, or `null` when rethrown
+
+#### Operation logging
+
+Check `Log_Operations__c` on the `GLOBAL` record to log every handler run, or on a handler's own record to log only that handler. After each run, including failed ones, `OperationLogger.logRun` receives a `TriggerHandler.TriggerRun` with:
+
+* `handlerName`, `operation`, `referenceId`, `records` / `getRecordIds()` - as above
+* `durationMs` - wall-clock time of the run
+* `cpuTimeMs` - CPU time used by the run
+* `succeeded` - `false` when the handler threw
+* `error` - the `TriggerError` passed to the error logger, or `null`
+
+Runs skipped by the bypass API, the `Bypass_Apex_Triggers` permission, or an inactive setting are not logged.
+
+Each logged run can publish a platform event, which counts against your limits, so turn operation logging on where you need it rather than everywhere by default.
+
+#### Adapters
+
+If a logger throws, the failure goes to the debug log, and the handler's own result is unchanged: the original error is still added to the records or rethrown.
+
+A clean error rolls back the transaction's DML, so loggers must publish with a Publish Immediately platform event. Nebula Logger and Triton both do this by default.
+
+[Nebula Logger](https://github.com/jongpie/NebulaLogger):
+
+```java
+public class NebulaTriggerLogger implements TriggerHandler.ErrorLogger, TriggerHandler.OperationLogger {
+  public void logError(TriggerHandler.TriggerError error) {
+    Logger.error(error.handlerName + ' failed in ' + error.operation + ' [' + error.referenceId + ']')
+      .setExceptionDetails(error.cause)
+      .addTag('TriggerHandler')
+      .addTag(error.handlerName);
+    Logger.saveLog();
+  }
+
+  public void logRun(TriggerHandler.TriggerRun run) {
+    Logger.info(run.handlerName + ' ' + run.operation + ' on ' + run.records.size() + ' records in '
+        + run.durationMs + 'ms (' + run.cpuTimeMs + 'ms CPU)')
+      .addTag('TriggerHandler')
+      .addTag(run.handlerName);
+    Logger.saveLog();
+  }
+}
+```
+
+[Pharos Triton](https://github.com/Pharos-AI/triton):
+
+```java
+public class TritonTriggerLogger implements TriggerHandler.ErrorLogger, TriggerHandler.OperationLogger {
+  public void logError(TriggerHandler.TriggerError error) {
+    Triton.logNow(Triton.makeBuilder()
+      .exception(error.cause)
+      .operation(error.handlerName + '.' + error.operation)
+      .relatedObjects(error.getRecordIds()));
+  }
+
+  public void logRun(TriggerHandler.TriggerRun run) {
+    Triton.logNow(Triton.makeBuilder()
+      .info(run.handlerName + ' ' + run.operation + ' on ' + run.records.size() + ' records')
+      .operation(run.handlerName + '.' + run.operation)
+      .duration(run.durationMs)
+      .relatedObjects(run.getRecordIds()));
+  }
+}
+```
+
+To log differently for one handler, override `logError(TriggerHandler.TriggerError error)` or `logRun(TriggerHandler.TriggerRun run)` in that handler.
 
 ## Overridable Methods
 

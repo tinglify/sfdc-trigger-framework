@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Log_Operations__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Sends every run to the operation logger. Checked on GLOBAL logs all handlers; checked on a handler's record logs only that handler.</description>
+    <externalId>false</externalId>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <inlineHelpText>Checked on GLOBAL logs every handler run. Checked on a handler's record logs only that handler.</inlineHelpText>
+    <label>Log Operations</label>
+    <type>Checkbox</type>
+</CustomField>
